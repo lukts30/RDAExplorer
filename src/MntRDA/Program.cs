@@ -101,7 +101,7 @@ namespace Demo
             UInt64 __pad3;
         };
 #endif
-        const string DLL_PATH = @"hello";
+        const string DLL_PATH = @"FuseNativeAdapter";
 
         static readonly UInt32 S_IFDIR = Convert.ToUInt32("0040000", 8);
         static readonly UInt32 S_IFREG = Convert.ToUInt32("0100000", 8);
