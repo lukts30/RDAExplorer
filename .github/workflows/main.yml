@@ -35,10 +35,11 @@ jobs:
           sudo apt-get -qq update
           sudo apt-get -qq install libfuse3-dev
 
-      - name: Build MntRDA
-        uses: actions/checkout@v2
+      - uses: actions/checkout@v2
         with:
           submodules: recursive
+
+      - name: Build MntRDA    
         shell: bash
         run: |
           cd src/MntRDA/
