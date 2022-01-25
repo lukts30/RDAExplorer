@@ -6,7 +6,7 @@ jobs:
     name: Test
     strategy:
       matrix:
-        name: [windows, linux]
+        name: [windows-2022, linux]
 
         include:
           - name: linux
