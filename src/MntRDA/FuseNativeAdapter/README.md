@@ -15,6 +15,6 @@ make install
 
 ```console
 mkdir build && cd build
-cmake -DCMAKE_INSTALL_PREFIX=../../bin/Debug/net6.0/
+cmake -DCMAKE_INSTALL_PREFIX=../../bin/Debug/net6.0/ ..
 cmake --build . --target install --config Release
 ```
