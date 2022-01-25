@@ -1,0 +1,49 @@
+on: [push, pull_request]
+
+name: CI
+jobs:
+  test:
+    name: Test
+    strategy:
+      matrix:
+        name: [windows, linux]
+
+        include:
+          - name: linux
+            os: ubuntu-latest
+            asset_name: MntRDA-linux-x64
+          - name: windows
+            os: windows-latest
+            asset_name: MntRDA-windows-x64
+    runs-on: ${{ matrix.os }}  
+    steps:
+      - name: Setup .NET 6
+        uses: actions/setup-dotnet@v1
+        with:
+          dotnet-version: '6.0.x'
+
+      - name: Install winfsp (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          choco install winfsp -y
+
+      - name: Install libfuse3-dev (Linux)
+        if: runner.os == 'linux'
+        shell: bash
+        run: |
+          sudo apt-get -qq update
+          sudo apt-get -qq install libfuse3-dev
+
+      - name: Build MntRDA
+      - uses: actions/checkout@v2
+        with:
+          submodules: recursive
+        shell: bash
+        run: |
+          cd src/MntRDA/
+          ./build_dist.sh
+      - uses: actions/upload-artifact@v2
+        with:
+          name: ${{ matrix.asset_name }}
+          path: src/MntRDA/dist/
