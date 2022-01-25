@@ -1,4 +1,4 @@
-﻿using RDAExplorer.Misc;
+using RDAExplorer.Misc;
 using System;
 using System.IO;
 
@@ -15,6 +15,9 @@ namespace RDAExplorer
         public ulong CompressedSize;
         public DateTime TimeStamp;
         public BinaryReader BinaryFile;
+        public FileStream FileStream;
+        private byte[] ContentData;
+        private bool ReadAndProcessed;
 
         public void SetFile(string file)
         {
@@ -27,19 +30,63 @@ namespace RDAExplorer
             FileStream fileStream = RDAFileStreamCache.Open(file);
             if (fileStream == null)
                 return;
-            BinaryFile = new BinaryReader(fileStream);
+            //BinaryFile = new BinaryReader(fileStream);
+            FileStream = fileStream;
         }
 
         public byte[] GetData()
         {
-            BinaryFile.BaseStream.Position = (long)Offset;
-            byte[] numArray = BinaryFile.ReadBytes((int)CompressedSize);
-            if (string.IsNullOrEmpty(OverwrittenFilePath))
+            // Read the source file into a byte array.
+            // BinaryFile.BaseStream.Position = (long)Offset;
+            //BinaryFile.BaseStream.Position = 0;
+            byte[] numArray = null;
+            int numBytesToRead = (int)CompressedSize;
+            int numBytesRead = 0;
+            // One migh considerer this to be a memory leak :)
+            if (ContentData is null)
             {
-                if ((Flags & Flag.Encrypted) == Flag.Encrypted)
-                    numArray = BinaryExtension.Decrypt(numArray, BinaryExtension.GetDecryptionSeed(Version));
-                if ((Flags & Flag.Compressed) == Flag.Compressed)
-                    numArray = ZLib.ZLib.Uncompress(numArray, (int)UncompressedSize);
+                if (BinaryFile.BaseStream is FileStream)
+                {
+                    numArray = new byte[CompressedSize];
+                    while (numBytesToRead > 0)
+                    {
+                        // Read may return anything from 0 to numBytesToRead.
+                        Span<Byte> dstSpan = numArray.AsSpan()[numBytesRead..numBytesToRead];
+                        // int k = BinaryFile.Read(numArrayGood, numBytesRead, numBytesToRead);
+                        int n = RandomAccess.Read(FileStream.SafeFileHandle, dstSpan, (long)this.Offset + (long)numBytesRead);
+
+                        // Break when the end of the file is reached.
+                        if (n == 0)
+                            break;
+
+                        numBytesRead += n;
+                        numBytesToRead -= n;
+                    }
+                    numBytesToRead = numArray.Length;
+                }
+                else
+                {
+                    BinaryFile.BaseStream.Position = (long)Offset;
+                    numArray = BinaryFile.ReadBytes((int)CompressedSize);
+                }
+                this.ContentData = numArray;
+            } else
+            {
+                numArray = this.ContentData;
+            }
+            
+            
+            if(!ReadAndProcessed)
+            {
+                if (string.IsNullOrEmpty(OverwrittenFilePath))
+                {
+                    if ((Flags & Flag.Encrypted) == Flag.Encrypted)
+                        numArray = BinaryExtension.Decrypt(numArray, BinaryExtension.GetDecryptionSeed(Version));
+                    if ((Flags & Flag.Compressed) == Flag.Compressed)
+                        numArray = ZLib.ZLib.Uncompress(numArray, (int)UncompressedSize);
+                }
+                this.ContentData = numArray;
+                this.ReadAndProcessed = true;
             }
             return numArray;
         }
@@ -55,7 +102,6 @@ namespace RDAExplorer
 
         public void Extract(string destinationfile)
         {
-            Console.WriteLine($"Extract: {this.FileName}");
             byte[] data = GetData();
             using (FileStream fileStream = new FileStream(destinationfile, FileMode.Create))
                 fileStream.Write(data, 0, data.Length);
@@ -83,6 +129,7 @@ namespace RDAExplorer
             rdaFile.CompressedSize = dir.compressed;
             rdaFile.TimeStamp = DateTimeExtension.FromTimeStamp(dir.timestamp);
             rdaFile.BinaryFile = mrm == null ? reader : new BinaryReader(mrm.Data);
+            rdaFile.FileStream = (FileStream)reader.BaseStream;
             return rdaFile;
         }
 
@@ -101,6 +148,7 @@ namespace RDAExplorer
             if (fileStream == null)
                 return null;
             rdaFile.BinaryFile = new BinaryReader(fileStream);
+            rdaFile.FileStream = fileStream;
             return rdaFile;
         }
 

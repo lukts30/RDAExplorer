@@ -1,4 +1,4 @@
-﻿using RDAExplorer.Misc;
+using RDAExplorer.Misc;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -61,7 +61,7 @@ namespace RDAExplorer
 
         public void ReadRDAFile()
         {
-            read = new BinaryReader(new FileStream(FileName, FileMode.Open));
+            read = new BinaryReader(new FileStream(FileName, FileMode.Open,FileAccess.Read,FileShare.Read, 0x8000, FileOptions.RandomAccess));
 
             byte[] firstTwoBytes = read.ReadBytes(2); read.BaseStream.Position = 0;
             if (firstTwoBytes[0] == 'R' && firstTwoBytes[1] == '\0')
