@@ -177,6 +177,12 @@ int main()
 	printf(".open %p\n", operations.open);
 }
 
+void PatchReleaseOperations(int (*f)(const char* path, struct fuse_file_info* fi)) {
+	printf(".release: %p\n", operations.release);
+	operations.release = f;
+	printf(".release %p\n", operations.release);
+}
+
  void PatchFuseReadOperations(int (*f)(const char* path, char* buf, size_t size, fuse_off_t off, struct fuse_file_info* fi)) {
 	printf(".read: %p\n", operations.read);
 	operations.read = f;

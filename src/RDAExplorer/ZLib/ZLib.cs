@@ -1,9 +1,7 @@
-﻿using ICSharpCode.SharpZipLib.Zip.Compression;
-using ICSharpCode.SharpZipLib.Zip.Compression.Streams;
-using System;
+﻿using System;
 using System.IO;
-using System.Linq;
 using System.Runtime.InteropServices;
+using System.IO.Compression;
 
 namespace RDAExplorer.ZLib
 {
@@ -27,7 +25,7 @@ namespace RDAExplorer.ZLib
             using (var compressedStream = new MemoryStream(input))
                 try
                 {
-                    using (var inputStream = new InflaterInputStream(compressedStream))
+                    using (var inputStream = new ZLibStream(compressedStream, CompressionMode.Decompress))
                     {
                         inputStream.CopyTo(outputStream);
                         outputStream.Position = 0;
@@ -49,12 +47,12 @@ namespace RDAExplorer.ZLib
         {
             using var stream = new MemoryStream(input);
             using var memoryStream = new MemoryStream();
-            using var deflaterStream = new DeflaterOutputStream(memoryStream, new Deflater(0));
+            using var zlibStream = new ZLibStream(memoryStream, CompressionMode.Compress);
 
 
             stream.Position = 0;
-            stream.CopyTo(deflaterStream);
-            deflaterStream.Close();
+            stream.CopyTo(zlibStream);
+            zlibStream.Close();
 
             return memoryStream.ToArray();
         }

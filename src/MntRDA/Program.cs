@@ -3,8 +3,12 @@ using System.Reflection;
 using System.Runtime;
 using System.Runtime.InteropServices;
 using System.Runtime.CompilerServices;
+using System.Collections.Concurrent;
 using System.Text;
+using System.Diagnostics;
 using RDAExplorer;
+
+
 
 
 namespace Demo
@@ -20,7 +24,7 @@ namespace Demo
             UInt32 bits1;
             UInt32 bits2;
             UInt32 bits3;
-            UInt64 fh;
+            public Int64 fh;
             UInt64 lock_owner;
             UInt32 poll_events;
         };
@@ -109,12 +113,16 @@ namespace Demo
         static readonly UInt32 O_ACCMODE = Convert.ToUInt32("00000003", 8);
         static readonly UInt32 O_RDONLY = 0x0000;
 
-        static readonly UInt32 ENOENT = 2;
-        static readonly UInt32 EACCES = 13;
+        const int ENOENT = 2;
+        const int EACCES = 0x0d;
 
-        
+        const int EBADF = 0x09;
+
+
 
         static RDAReader reader = new RDAReader();
+        static ConcurrentDictionary<long, RDAFile> globalFdTable = new();
+        static Random random = new Random();
 
         [DllImport(DLL_PATH)]
         private static extern int pre_main(int argc, string[] argv);
@@ -130,11 +138,14 @@ namespace Demo
         private static extern unsafe void PatchOpenOperations(delegate* unmanaged[Cdecl]<IntPtr, Fuse3FileInfo*, int> callback);
 
         [DllImport(DLL_PATH)]
+        private static extern unsafe void PatchReleaseOperations(delegate* unmanaged[Cdecl]<IntPtr, Fuse3FileInfo*, int> callback);
+
+        [DllImport(DLL_PATH)]
         private static extern unsafe void PatchFuseGetattrOperations(delegate* unmanaged[Cdecl]<IntPtr, Stat*, int> callback);
 
 
         [DllImport(DLL_PATH)]
-        private static extern unsafe void PatchFuseReadOperations(delegate* unmanaged[Cdecl]<IntPtr, IntPtr, nuint, nint, IntPtr, int> callback);
+        private static extern unsafe void PatchFuseReadOperations(delegate* unmanaged[Cdecl]<IntPtr, IntPtr, nuint, nint, Fuse3FileInfo*, int> callback);
 
         [DllImport(DLL_PATH)]
         private static extern unsafe void PatchFuseReaddirOperations(delegate* unmanaged[Cdecl]<IntPtr, IntPtr, delegate* unmanaged[Cdecl]<IntPtr, byte*, IntPtr, nint, int, int>, nint, IntPtr, int> callback);
@@ -145,7 +156,75 @@ namespace Demo
             if ((fi->flags & O_ACCMODE) != O_RDONLY)
                 return (int)-EACCES;
 
+            var maybeFile = LookUpPath(path) as RDAFile;
+
+            if (maybeFile is not null)
+            {
+                int fid = random.Next();
+                do
+                {
+                    fid = random.Next();
+                } while (globalFdTable.ContainsKey(fid));
+                globalFdTable[fid] = maybeFile;
+                fi->fh = fid;
+                System.Console.WriteLine($"Added fd: {fid}");
+            }
             return 0;
+        }
+
+        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+        public static unsafe int impl_release(IntPtr path, Fuse3FileInfo* fi)
+        {
+            var rem = globalFdTable.Remove(fi->fh, out RDAFile? _file);
+            Debug.Assert(rem);
+            System.Console.WriteLine($"Released: {fi->fh}");
+            return 0;
+        }
+
+        public static Object LookUpPath(IntPtr path)
+        {
+            bool IsNotADir = false;
+            try
+            {
+
+                string strPath = Marshal.PtrToStringUTF8(path);
+                RDAFolder? folder = null;
+                if (strPath.Equals("/"))
+                {
+                    folder = reader.rdaFolder;
+                }
+                else
+                {
+                    folder = SeachFolderIn(reader.rdaFolder, strPath);
+                    if (folder is null)
+                    {
+                        folder = SeachFolderIn(reader.rdaFolder, Path.GetDirectoryName(strPath).Replace("\\", "/"));
+                        IsNotADir = true;
+                        System.Console.WriteLine($"{strPath} seems to be a file? {folder is not null}");
+                    }
+                }
+
+                if (folder is not null)
+                {
+
+                    var file = folder.Files.Find(f => f.FileName.Equals(strPath.Substring(1)));
+                    System.Console.WriteLine($"Testing {strPath} file? {file is null}");
+                    if (file is not null)
+                    {
+                        System.Console.WriteLine($"{strPath} is a file!");
+                        return file;
+                    }
+                    else if (!IsNotADir)
+                    {
+                        return folder;
+                    }
+                }
+            }
+            catch
+            {
+                return null;
+            }
+            return null;
         }
 
         [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
@@ -164,7 +243,7 @@ namespace Demo
             try
             {
 
-                string strPath = Marshal.PtrToStringAnsi(path);
+                string strPath = Marshal.PtrToStringUTF8(path);
                 RDAFolder? folder = null;
                 if (strPath.Equals("/"))
                 {
@@ -257,7 +336,7 @@ namespace Demo
             try
             {
 
-                string strPath = Marshal.PtrToStringAnsi(path);
+                string strPath = Marshal.PtrToStringUTF8(path);
                 Console.WriteLine($"Trying readdir {strPath} offset: {offset}");
                 Console.WriteLine($"readdir {strPath} offset: {offset}");
 
@@ -288,22 +367,26 @@ namespace Demo
                         System.Console.WriteLine($"{strPath} is a Folder! {folder.FullPath}");
                     }
 
-                    var dotdot = Encoding.UTF8.GetBytes(".." + "\0");
-                    fixed (byte* p = &dotdot[0])
+                    Span<byte> utf8NullTerminated = stackalloc byte[255];
+                    var res = Encoding.UTF8.GetBytes("..".AsSpan(), utf8NullTerminated);
+                    utf8NullTerminated[res] = (byte)'\0';
+                    fixed (byte* p = &utf8NullTerminated[0])
                     {
                         filler(buffer, p, IntPtr.Zero, 0, 0);
                     }
 
-                    var dot = Encoding.UTF8.GetBytes("." + "\0");
-                    fixed (byte* p = &dot[0])
+                    res = Encoding.UTF8.GetBytes(".".AsSpan(), utf8NullTerminated);
+                    utf8NullTerminated[res] = (byte)'\0';
+                    fixed (byte* p = &utf8NullTerminated[0])
                     {
                         filler(buffer, p, IntPtr.Zero, 0, 0);
                     }
 
                     foreach (var subFolder in folder.Folders)
                     {
-                        var uft8Filename = Encoding.UTF8.GetBytes(subFolder.Name + "\0");
-                        fixed (byte* p = &uft8Filename[0])
+                        res = Encoding.UTF8.GetBytes(subFolder.Name.AsSpan(), utf8NullTerminated);
+                        utf8NullTerminated[res] = (byte)'\0';
+                        fixed (byte* p = &utf8NullTerminated[0])
                         {
                             filler(buffer, p, IntPtr.Zero, 0, 0);
                         }
@@ -312,8 +395,9 @@ namespace Demo
                     foreach (var file in folder.Files)
                     {
                         System.Console.WriteLine($"File: {Path.GetFileName(file.FileName)}");
-                        var uft8Filename = Encoding.UTF8.GetBytes(Path.GetFileName(file.FileName) + "\0");
-                        fixed (byte* p = &uft8Filename[0])
+                        res = Encoding.UTF8.GetBytes(Path.GetFileName(file.FileName).AsSpan(), utf8NullTerminated);
+                        utf8NullTerminated[res] = (byte)'\0';
+                        fixed (byte* p = &utf8NullTerminated[0])
                         {
                             filler(buffer, p, IntPtr.Zero, 0, 0);
                         }
@@ -328,7 +412,7 @@ namespace Demo
 
 
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 // Exceptions escaping out of UnmanagedCallersOnly methods are treated as unhandled exceptions.
                 // The errors have to be marshalled manually if necessary.
@@ -339,77 +423,43 @@ namespace Demo
         }
 
         [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-        public static int impl_read(IntPtr path, IntPtr buffer, nuint size, nint offset, IntPtr fi)
+        public static unsafe int impl_read(IntPtr path, IntPtr buffer, nuint size, nint offset, Fuse3FileInfo* fi)
         {
-            try
+            var file = globalFdTable[fi->fh];
+            Span<byte> bytes = new Span<byte>((byte*)buffer, (int)size);
+            if (file is not null)
             {
-                Span<byte> bytes;
-                unsafe { bytes = new Span<byte>((byte*)buffer, (int)size); }
+                var data = file.GetData();
 
-                string strPath = Marshal.PtrToStringAnsi(path);
-                RDAFolder folder = null;
-                if (strPath.Equals("/"))
+                int upper = Math.Min(Math.Min((int)size, data.Length) + (int)offset, data.Length);
+                int ret = ((int)upper - (int)offset);
+                if (ret <= 0)
+
                 {
-                    folder = reader.rdaFolder;
+                    return 0;
                 }
-                else
+                try
                 {
-                    // folder = RDAFolder.NavigateTo(reader.rdaFolder, Path.GetDirectoryName(strPath).Replace("\\", "/"), "");
-                    folder = SeachFolderIn(reader.rdaFolder, Path.GetDirectoryName(strPath).Replace("\\", "/"));
+                    //System.Console.WriteLine($"{strPath} is a file! upper: {upper} off: {offset} size: {size}");
+                    data[(int)offset..(int)upper].CopyTo(bytes);
+                    return (int)upper - (int)offset;
                 }
-
-                if (folder is not null)
+                catch (Exception)
                 {
-
-                    var file = folder.Files.Find(f => f.FileName.Equals(strPath.Substring(1)));
-                    if (file is not null)
-                    {
-                        var data = file.GetData();
-
-                        int upper = Math.Min(Math.Min((int)size, data.Length) + (int)offset, data.Length);
-                        int ret = ((int)upper - (int)offset);
-                        if (ret <= 0)
-
-                        {
-                            return 0;
-                            //throw new Exception("");
-                        }
-                        try
-                        {
-                            System.Console.WriteLine($"{strPath} is a file! upper: {upper} off: {offset} size: {size}");
-                            data[(int)offset..(int)upper].CopyTo(bytes);
-                            return (int)upper - (int)offset;
-                        }
-                        catch (Exception)
-                        {
-                            throw;
-                        }
-
-                    }
+                    throw;
                 }
-
-
             }
-            catch (Exception ex)
-            {
-                // Exceptions escaping out of UnmanagedCallersOnly methods are treated as unhandled exceptions.
-                // The errors have to be marshalled manually if necessary.
-
-                System.Console.WriteLine(ex.ToString());
-                return -1;
-            }
-
-            return -2;
+            return -EBADF;
         }
 
         public static void Main(string[] badargs)
         {
-            var argsShifted = new string[badargs.Length+1];
+            var argsShifted = new string[badargs.Length + 1];
             argsShifted[0] = "";
-            Array.Copy(badargs,0,argsShifted,1,badargs.Length);
+            Array.Copy(badargs, 0, argsShifted, 1, badargs.Length);
             System.Console.WriteLine(badargs.Length);
             System.Console.WriteLine(argsShifted.ToString());
-            pre_main(argsShifted.Length,argsShifted);
+            pre_main(argsShifted.Length, argsShifted);
 
             System.Console.WriteLine($"st_nlink: {Marshal.OffsetOf(typeof(Stat), "st_nlink")}");
             System.Console.WriteLine($"st_mode: {Marshal.OffsetOf(typeof(Stat), "st_mode")}");
@@ -419,8 +469,10 @@ namespace Demo
             System.Console.WriteLine($"st_atime: {Marshal.OffsetOf(typeof(Stat), "st_atime")}");
             System.Console.WriteLine($"st_mtime: {Marshal.OffsetOf(typeof(Stat), "st_mtime")}");
 
+            System.Console.WriteLine($"fh: {Marshal.OffsetOf(typeof(Fuse3FileInfo), "fh")}");
+
             // var fileName = @"C:\Program Files (x86)\Ubisoft\Related Designs\ANNO 2070 DEMO\maindata\data0.rda";
-            string? fileName = Marshal.PtrToStringAnsi(GetRdaParameter());
+            string? fileName = Marshal.PtrToStringUTF8(GetRdaParameter());
 
             //var fileName = @"/home/lukas/WinGuest/Data0.rda";
             reader.FileName = fileName;
@@ -429,16 +481,14 @@ namespace Demo
 
             unsafe
             {
-                Console.WriteLine($"NativeFunctio that invokes a callback!");
+                Console.WriteLine($"NativeFunctions that invokes a callback!");
                 PatchOpenOperations(&impl_open);
+                PatchReleaseOperations(&impl_release);
                 PatchFuseReadOperations(&impl_read);
                 PatchFuseReaddirOperations(&impl_readdir);
                 PatchFuseGetattrOperations(&impl_getattr);
             }
-            //string[] argv = { "", "-f", "-h", "/home/lukas/SSFS/mnt/" };
-            //string[] argv = { "", "-f", "-h"};
             main();
-
         }
     }
 }
