@@ -120,7 +120,9 @@ namespace Demo
 
 
 
-        static RDAReader reader = new RDAReader();
+        static List<RDAReader> readers = new ();
+
+        static RDAFolder mergedFolder;
         static ConcurrentDictionary<long, RDAFile> globalFdTable = new();
         static Random random = new Random();
 
@@ -164,8 +166,8 @@ namespace Demo
                 do
                 {
                     fid = random.Next();
-                } while (globalFdTable.ContainsKey(fid));
-                globalFdTable[fid] = maybeFile;
+                } while (!globalFdTable.TryAdd(fid,maybeFile));
+                //globalFdTable[fid] = maybeFile;
                 fi->fh = fid;
                 System.Console.WriteLine($"Added fd: {fid}");
             }
@@ -191,14 +193,14 @@ namespace Demo
                 RDAFolder? folder = null;
                 if (strPath.Equals("/"))
                 {
-                    folder = reader.rdaFolder;
+                    folder = GetRdaFolder();
                 }
                 else
                 {
-                    folder = SeachFolderIn(reader.rdaFolder, strPath);
+                    folder = SeachFolderIn(GetRdaFolder(), strPath);
                     if (folder is null)
                     {
-                        folder = SeachFolderIn(reader.rdaFolder, Path.GetDirectoryName(strPath).Replace("\\", "/"));
+                        folder = SeachFolderIn(GetRdaFolder(), Path.GetDirectoryName(strPath).Replace("\\", "/"));
                         IsNotADir = true;
                         System.Console.WriteLine($"{strPath} seems to be a file? {folder is not null}");
                     }
@@ -247,15 +249,15 @@ namespace Demo
                 RDAFolder? folder = null;
                 if (strPath.Equals("/"))
                 {
-                    folder = reader.rdaFolder;
+                    folder = GetRdaFolder();
                 }
                 else
                 {
-                    // folder = RDAFolder.NavigateTo(reader.rdaFolder, Path.GetDirectoryName(strPath), "");
-                    folder = SeachFolderIn(reader.rdaFolder, strPath);
+                    // folder = RDAFolder.NavigateTo(GetRdaFolder(), Path.GetDirectoryName(strPath), "");
+                    folder = SeachFolderIn(GetRdaFolder(), strPath);
                     if (folder is null)
                     {
-                        folder = SeachFolderIn(reader.rdaFolder, Path.GetDirectoryName(strPath).Replace("\\", "/"));
+                        folder = SeachFolderIn(GetRdaFolder(), Path.GetDirectoryName(strPath).Replace("\\", "/"));
                         IsNotADir = true;
                         System.Console.WriteLine($"{strPath} seems to be a file? {folder is not null}");
                     }
@@ -341,15 +343,15 @@ namespace Demo
                 Console.WriteLine($"readdir {strPath} offset: {offset}");
 
                 RDAFolder? folder = null;
-                System.Console.WriteLine(reader.rdaFolder.Folders.Count);
+                System.Console.WriteLine(GetRdaFolder().Folders.Count);
                 if (strPath.Equals("/"))
                 {
-                    folder = reader.rdaFolder;
+                    folder = GetRdaFolder();
                 }
                 else
                 {
-                    //folder = RDAFolder.NavigateTo(reader.rdaFolder, strPath, "");
-                    folder = SeachFolderIn(reader.rdaFolder, strPath);
+                    //folder = RDAFolder.NavigateTo(GetRdaFolder(), strPath, "");
+                    folder = SeachFolderIn(GetRdaFolder(), strPath);
                 }
 
                 System.Console.WriteLine($"GetDirectoryName({strPath}) {Path.GetDirectoryName(strPath)?.Replace("\\", "/")}");
@@ -475,8 +477,32 @@ namespace Demo
             string? fileName = Marshal.PtrToStringUTF8(GetRdaParameter());
 
             //var fileName = @"/home/lukas/WinGuest/Data0.rda";
-            reader.FileName = fileName;
-            reader.ReadRDAFile();
+            string[] rdaFiles = {
+                @"/home/lukas/Games/ubisoft-connect/drive_c/Program Files (x86)/Ubisoft/Ubisoft Game Launcher/games/Anno 1404 - History Edition/addon/data0.rda",
+                @"/home/lukas/Games/ubisoft-connect/drive_c/Program Files (x86)/Ubisoft/Ubisoft Game Launcher/games/Anno 1404 - History Edition/addon/data1.rda",
+                @"/home/lukas/Games/ubisoft-connect/drive_c/Program Files (x86)/Ubisoft/Ubisoft Game Launcher/games/Anno 1404 - History Edition/addon/data2.rda",
+                @"/home/lukas/Games/ubisoft-connect/drive_c/Program Files (x86)/Ubisoft/Ubisoft Game Launcher/games/Anno 1404 - History Edition/addon/data3.rda",
+                @"/home/lukas/Games/ubisoft-connect/drive_c/Program Files (x86)/Ubisoft/Ubisoft Game Launcher/games/Anno 1404 - History Edition/addon/data4.rda",
+                @"/home/lukas/Games/ubisoft-connect/drive_c/Program Files (x86)/Ubisoft/Ubisoft Game Launcher/games/Anno 1404 - History Edition/addon/data5.rda"
+            };
+            //string[] rdaFiles = { @"/home/lukas/WinGuest/Data0.rda" };
+
+            List<RDAFile>[] listOfFilelists = new List<RDAFile>[rdaFiles.Length];
+            int i = 0;
+            foreach (var file in rdaFiles)
+            {
+                var reader = new RDAReader();
+                reader.FileName = file;
+                reader.ReadRDAFile();
+                listOfFilelists[i++] = reader.rdaFileEntries;
+                readers.Add(reader);
+            }
+            var lowest = listOfFilelists[0];
+            var uppers = listOfFilelists[1..];
+            var mergedFilelist = MergeList(lowest,uppers);
+
+            mergedFolder = RDAFolder.GenerateFrom(mergedFilelist, readers.First().rdaFolder.Version);
+            
             System.Console.WriteLine($"stat size: {System.Runtime.InteropServices.Marshal.SizeOf(typeof(Stat))}");
 
             unsafe
@@ -489,6 +515,26 @@ namespace Demo
                 PatchFuseGetattrOperations(&impl_getattr);
             }
             main();
+        }
+
+        static RDAFolder GetRdaFolder() {
+            return mergedFolder;
+        }
+
+        static List<RDAFile> MergeList(List<RDAFile> lower, IEnumerable<List<RDAFile>> uppers) {
+            var dict = lower.ToDictionary(f => f.FileName);
+            foreach (var upper in uppers)
+            {
+                MergeList(dict,upper);
+            }
+            return dict.Values.ToList<RDAFile>();
+        }
+
+        static void MergeList(Dictionary<string,RDAFile> lower, List<RDAFile> upper) {
+            foreach (var file in upper)
+            {
+                lower[file.FileName] = file;
+            }
         }
     }
 }
