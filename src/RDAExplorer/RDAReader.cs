@@ -11,7 +11,7 @@ namespace RDAExplorer
 {
     public class RDAReader : IDisposable
     {
-        private List<RDAFile> rdaFileEntries = new List<RDAFile>();
+        public List<RDAFile> rdaFileEntries { get; } = new List<RDAFile>();
         public RDAFolder rdaFolder = new RDAFolder(FileHeader.Version.Version_2_2);
         public string FileName;
         private BinaryReader read;
@@ -61,7 +61,7 @@ namespace RDAExplorer
 
         public void ReadRDAFile()
         {
-            read = new BinaryReader(new FileStream(FileName, FileMode.Open,FileAccess.Read,FileShare.Read, 0x8000, FileOptions.RandomAccess));
+            read = new BinaryReader(new FileStream(FileName, FileMode.Open,FileAccess.Read,FileShare.Read, 0x8000, FileOptions.None));
 
             byte[] firstTwoBytes = read.ReadBytes(2); read.BaseStream.Position = 0;
             if (firstTwoBytes[0] == 'R' && firstTwoBytes[1] == '\0')

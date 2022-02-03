@@ -16,6 +16,8 @@ namespace RDAExplorer
         public DateTime TimeStamp;
         public BinaryReader BinaryFile;
         public FileStream FileStream;
+
+        readonly object LockObject = new object();
         private byte[] ContentData;
         private bool ReadAndProcessed;
 
@@ -66,8 +68,11 @@ namespace RDAExplorer
                 }
                 else
                 {
-                    BinaryFile.BaseStream.Position = (long)Offset;
-                    numArray = BinaryFile.ReadBytes((int)CompressedSize);
+                    lock (LockObject)
+                    {
+                        BinaryFile.BaseStream.Position = (long)Offset;
+                        numArray = BinaryFile.ReadBytes((int)CompressedSize);
+                    }
                 }
                 this.ContentData = numArray;
             } else
