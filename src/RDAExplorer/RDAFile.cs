@@ -74,12 +74,18 @@ namespace RDAExplorer
                         numArray = BinaryFile.ReadBytes((int)CompressedSize);
                     }
                 }
-                this.ContentData = numArray;
+                lock (LockObject) {
+                    this.ContentData = numArray;
+                }
             } else
             {
-                numArray = this.ContentData;
+                lock (LockObject) {
+                    numArray = this.ContentData;
+                }
             }
             
+            int r = (int)Flags;
+            System.Console.WriteLine(r);
             
             if(!ReadAndProcessed)
             {
@@ -90,8 +96,10 @@ namespace RDAExplorer
                     if ((Flags & Flag.Compressed) == Flag.Compressed)
                         numArray = ZLib.ZLib.Uncompress(numArray, (int)UncompressedSize);
                 }
-                this.ContentData = numArray;
-                this.ReadAndProcessed = true;
+                lock (LockObject) {
+                    this.ContentData = numArray;
+                    this.ReadAndProcessed = true;
+                }
             }
             return numArray;
         }

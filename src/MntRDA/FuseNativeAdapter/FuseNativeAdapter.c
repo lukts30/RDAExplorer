@@ -19,6 +19,7 @@
 #include <time.h>
 #include <string.h>
 #include <stdlib.h>
+#include <assert.h>
 #include <time.h>
 #include <fcntl.h>
 
@@ -147,6 +148,15 @@ int pre_main(int argc, char* argv[]) {
 	printf("offset st_mtim: %zu\n", offsetof(struct fuse_stat, st_mtim));
 	return 0;
 }
+
+void PrintHelpIfNeeded() {
+	if (options.show_help) {
+		printf("Dummy help MntRDA!");
+		assert(fuse_opt_add_arg(&f_args, "--help") == 0);
+		f_args.argv[0][0] = '\0';
+	}
+}
+
 int main()
 {
     
@@ -171,32 +181,32 @@ int main()
 	return ret;
 }
 
- void PatchOpenOperations(int (*f)(const char* path, struct fuse_file_info* fi)) {
+ void PatchOpen(int (*f)(const char* path, struct fuse_file_info* fi)) {
 	printf(".open: %p\n", operations.open);
 	operations.open = f;
 	printf(".open %p\n", operations.open);
 }
 
-void PatchReleaseOperations(int (*f)(const char* path, struct fuse_file_info* fi)) {
+void PatchRelease(int (*f)(const char* path, struct fuse_file_info* fi)) {
 	printf(".release: %p\n", operations.release);
 	operations.release = f;
 	printf(".release %p\n", operations.release);
 }
 
- void PatchFuseReadOperations(int (*f)(const char* path, char* buf, size_t size, fuse_off_t off, struct fuse_file_info* fi)) {
+ void PatchFuseRead(int (*f)(const char* path, char* buf, size_t size, fuse_off_t off, struct fuse_file_info* fi)) {
 	printf(".read: %p\n", operations.read);
 	operations.read = f;
 	printf(".read: %p\n", operations.read);
 }
 
- void PatchFuseReaddirOperations(int (*f)(const char* path, void* buf, fuse_fill_dir_t filler, fuse_off_t off,
+ void PatchFuseReaddir(int (*f)(const char* path, void* buf, fuse_fill_dir_t filler, fuse_off_t off,
 	struct fuse_file_info* fi, enum fuse_readdir_flags)) {
 	printf(".readdir: %p\n", operations.readdir);
 	operations.readdir = f;
 	printf(".readdir: %p\n", operations.readdir);
 }
 
- void PatchFuseGetattrOperations(int (*f)(const char* path, struct fuse_stat* stbuf,
+ void PatchFuseGetattr(int (*f)(const char* path, struct fuse_stat* stbuf,
 	struct fuse_file_info* fi)) {
 	printf(".getattr: %p\n", operations.getattr);
 	operations.getattr = f;

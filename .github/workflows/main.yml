@@ -43,7 +43,7 @@ jobs:
         shell: bash
         run: |
           cd src/MntRDA/
-          ./build_dist.sh
+          ./make_dist.sh
       - uses: actions/upload-artifact@v2
         with:
           name: ${{ matrix.asset_name }}

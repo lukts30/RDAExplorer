@@ -1,6 +1,3 @@
-﻿using System;
-using System.Reflection;
-using System.Runtime;
 using System.Runtime.InteropServices;
 using System.Runtime.CompilerServices;
 using System.Collections.Concurrent;
@@ -9,187 +6,50 @@ using System.Diagnostics;
 using RDAExplorer;
 
 
-
-
-namespace Demo
+namespace MntRDA
 {
-    public class Program
+    internal class Program
     {
+        static List<RDAReader> RDAReaders = new ();
 
+        static RDAFolder? MergedFolder;
+        static ConcurrentDictionary<long, RDAFile> GlobalFdTable = new();
+        static Random FdRandomGen = new Random();
+        static SpinLock FdRandomGenSpinLock = new SpinLock();
 
-        [StructLayout(LayoutKind.Sequential)]
-        public struct Fuse3FileInfo
+        internal static RDAFolder? SeachFolderIn(RDAFolder folder, string strPath)
         {
-            public UInt32 flags;
-            UInt32 bits1;
-            UInt32 bits2;
-            UInt32 bits3;
-            public Int64 fh;
-            UInt64 lock_owner;
-            UInt32 poll_events;
-        };
-#if _WINDOWS
-        
-
-        [StructLayout(LayoutKind.Sequential)]
-        public struct Stat
+            Queue<string> Queue = new Queue<string>(strPath.Split('/'));
+            Queue.Dequeue();
+            return SeachFolderIn(folder, Queue);
+        }
+        internal static RDAFolder? SeachFolderIn(RDAFolder folder, Queue<string> Queue)
         {
-            UInt64 st_dev;
-
-            UInt64 st_ino;
-
-            public UInt32 st_mode;
-
-            public UInt32 st_nlink;
-
-
-            public UInt32 st_uid;
-            public UInt32 st_gid;
-
-
-            UInt32 st_rdev;
-
-            public Int64 st_size;
-
-            /* Number 512-byte blocks allocated. */
-
-            public Int64 st_atime;
-            UInt64 st_atime_nsec;
-
-            public Int64 st_mtime;
-            UInt32 st_mtime_nsec;
-
-            UInt64 st_ctime;
-            UInt64 st_ctime_nsec;
-
-            UInt64 __pad1;
-            UInt64 __pad2;
-            UInt64 __pad3;
-        };
-#else
-
-        [StructLayout(LayoutKind.Sequential)]
-        public struct Stat
-        {
-            UInt64 st_dev;
-
-            UInt64 st_ino;
-
-            public UInt64 st_nlink;
-            public UInt32 st_mode;
-
-            public UInt32 st_uid;
-            public UInt32 st_gid;
-
-            UInt32 __pad0;
-
-            UInt64 st_rdev;
-
-            public Int64 st_size;
-            UInt64 st_blksize;
-
-            /* Number 512-byte blocks allocated. */
-            UInt64 st_blocks;
-
-            public Int64 st_atime;
-            UInt64 st_atime_nsec;
-
-            public Int64 st_mtime;
-            UInt32 st_mtime_nsec;
-
-            UInt64 st_ctime;
-            UInt64 st_ctime_nsec;
-
-            UInt64 __pad1;
-            UInt64 __pad2;
-            UInt64 __pad3;
-        };
-#endif
-        const string DLL_PATH = @"FuseNativeAdapter";
-
-        static readonly UInt32 S_IFDIR = Convert.ToUInt32("0040000", 8);
-        static readonly UInt32 S_IFREG = Convert.ToUInt32("0100000", 8);
-
-        static readonly UInt32 O_ACCMODE = Convert.ToUInt32("00000003", 8);
-        static readonly UInt32 O_RDONLY = 0x0000;
-
-        const int ENOENT = 2;
-        const int EACCES = 0x0d;
-
-        const int EBADF = 0x09;
-
-
-
-        static List<RDAReader> readers = new ();
-
-        static RDAFolder mergedFolder;
-        static ConcurrentDictionary<long, RDAFile> globalFdTable = new();
-        static Random random = new Random();
-
-        [DllImport(DLL_PATH)]
-        private static extern int pre_main(int argc, string[] argv);
-
-        [DllImport(DLL_PATH)]
-        private static extern int main();
-
-
-        [DllImport(DLL_PATH)]
-        private static extern IntPtr GetRdaParameter();
-
-        [DllImport(DLL_PATH)]
-        private static extern unsafe void PatchOpenOperations(delegate* unmanaged[Cdecl]<IntPtr, Fuse3FileInfo*, int> callback);
-
-        [DllImport(DLL_PATH)]
-        private static extern unsafe void PatchReleaseOperations(delegate* unmanaged[Cdecl]<IntPtr, Fuse3FileInfo*, int> callback);
-
-        [DllImport(DLL_PATH)]
-        private static extern unsafe void PatchFuseGetattrOperations(delegate* unmanaged[Cdecl]<IntPtr, Stat*, int> callback);
-
-
-        [DllImport(DLL_PATH)]
-        private static extern unsafe void PatchFuseReadOperations(delegate* unmanaged[Cdecl]<IntPtr, IntPtr, nuint, nint, Fuse3FileInfo*, int> callback);
-
-        [DllImport(DLL_PATH)]
-        private static extern unsafe void PatchFuseReaddirOperations(delegate* unmanaged[Cdecl]<IntPtr, IntPtr, delegate* unmanaged[Cdecl]<IntPtr, byte*, IntPtr, nint, int, int>, nint, IntPtr, int> callback);
-
-        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-        public static unsafe int impl_open(IntPtr path, Fuse3FileInfo* fi)
-        {
-            if ((fi->flags & O_ACCMODE) != O_RDONLY)
-                return (int)-EACCES;
-
-            var maybeFile = LookUpPath(path) as RDAFile;
-
-            if (maybeFile is not null)
+            var folderToFind = Queue.Dequeue();
+            foreach (RDAFolder rdaFolder in folder.Folders)
             {
-                int fid = random.Next();
-                do
+                if (rdaFolder.Name.Equals(folderToFind))
                 {
-                    fid = random.Next();
-                } while (!globalFdTable.TryAdd(fid,maybeFile));
-                //globalFdTable[fid] = maybeFile;
-                fi->fh = fid;
-                System.Console.WriteLine($"Added fd: {fid}");
+                    if (!Queue.Any())
+                    {
+                        return rdaFolder;
+                    }
+                    else
+                    {
+                        return SeachFolderIn(rdaFolder, Queue);
+                    }
+                }
             }
-            return 0;
+            return null;
         }
 
-        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-        public static unsafe int impl_release(IntPtr path, Fuse3FileInfo* fi)
-        {
-            var rem = globalFdTable.Remove(fi->fh, out RDAFile? _file);
-            Debug.Assert(rem);
-            System.Console.WriteLine($"Released: {fi->fh}");
-            return 0;
-        }
-
-        public static Object LookUpPath(IntPtr path)
+        internal static Object? LookUpPath(IntPtr path)
         {
             bool IsNotADir = false;
             try
             {
 
-                string strPath = Marshal.PtrToStringUTF8(path);
+                string strPath = Marshal.PtrToStringUTF8(path)!;
                 RDAFolder? folder = null;
                 if (strPath.Equals("/"))
                 {
@@ -200,9 +60,8 @@ namespace Demo
                     folder = SeachFolderIn(GetRdaFolder(), strPath);
                     if (folder is null)
                     {
-                        folder = SeachFolderIn(GetRdaFolder(), Path.GetDirectoryName(strPath).Replace("\\", "/"));
+                        folder = SeachFolderIn(GetRdaFolder(), Path.GetDirectoryName(strPath)!.Replace("\\", "/"));
                         IsNotADir = true;
-                        System.Console.WriteLine($"{strPath} seems to be a file? {folder is not null}");
                     }
                 }
 
@@ -230,220 +89,174 @@ namespace Demo
         }
 
         [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-        public static unsafe int impl_getattr(IntPtr path, Stat* st)
+        internal static unsafe int ImplOpen(IntPtr path, Fuse3FileInfo* fi)
         {
-            bool IsNotADir = false;
-            System.Runtime.CompilerServices.Unsafe.InitBlock(st, 0, 144);
+            if ((fi->flags & Interop.OpenFlags.O_ACCMODE) != Interop.OpenFlags.O_RDONLY)
+                return (int)-Interop.Error.EACCES;
 
+            var maybeFile = LookUpPath(path) as RDAFile;
 
+            if (maybeFile is not null)
+            {
+                int fid;
+                bool lockTaken = false;
+                try
+                {
+                    FdRandomGenSpinLock.Enter(ref lockTaken);
+                    do
+                    {
+                        fid = FdRandomGen.Next();
+                    } while (!GlobalFdTable.TryAdd(fid,maybeFile));
+                }
+                finally
+                {
+                    if (lockTaken)
+                    {
+                        FdRandomGenSpinLock.Exit(false);
+                    }
+                }
+                fi->fh = fid;
+                System.Console.WriteLine($"Added fd: {fid}");
+            }
+            return 0;
+        }
 
+        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+        internal static unsafe int ImplRelease(IntPtr path, Fuse3FileInfo* fi)
+        {
+            var rem = GlobalFdTable.Remove(fi->fh, out RDAFile? _file);
+            Debug.Assert(rem);
+            System.Console.WriteLine($"Released: {fi->fh}");
+            return 0;
+        }
+
+        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+        internal static unsafe int ImplGetattr(IntPtr path, Stat* st)
+        {
+            System.Runtime.CompilerServices.Unsafe.InitBlock(st, 0, (uint)System.Runtime.InteropServices.Marshal.SizeOf(typeof(Stat)));
+
+            int ret = -Interop.Error.ENOENT;
             st->st_uid = 1000;
             st->st_gid = 1000;
-            st->st_atime = DateTimeOffset.Now.ToUnixTimeSeconds();
-            st->st_mtime = DateTimeOffset.Now.ToUnixTimeSeconds();
 
             try
             {
-
-                string strPath = Marshal.PtrToStringUTF8(path);
-                RDAFolder? folder = null;
-                if (strPath.Equals("/"))
+                string strPath = Marshal.PtrToStringUTF8(path)!;
+                switch (LookUpPath(path))
                 {
-                    folder = GetRdaFolder();
-                }
-                else
-                {
-                    // folder = RDAFolder.NavigateTo(GetRdaFolder(), Path.GetDirectoryName(strPath), "");
-                    folder = SeachFolderIn(GetRdaFolder(), strPath);
-                    if (folder is null)
-                    {
-                        folder = SeachFolderIn(GetRdaFolder(), Path.GetDirectoryName(strPath).Replace("\\", "/"));
-                        IsNotADir = true;
-                        System.Console.WriteLine($"{strPath} seems to be a file? {folder is not null}");
-                    }
-                }
+                    case RDAFile file:
+                        {
+                            System.Console.WriteLine($"{strPath} is a file!");
+                            st->st_mode = Interop.FileTypes.S_IFREG | Convert.ToUInt32("0444", 8);
+                            st->st_nlink = 1;
+                            st->st_size = (long)file.UncompressedSize;
 
-                if (folder is not null)
-                {
+                            long timeStamp = ((DateTimeOffset)file.TimeStamp).ToUnixTimeSeconds();
+                            st->st_atime = timeStamp;
+                            st->st_mtime = timeStamp;
+                            st->st_ctime = timeStamp;
+                            ret = 0;
+                        }
+                        break;
+                    case RDAFolder folder:
+                        {
+                            st->st_mode = Interop.FileTypes.S_IFDIR | Convert.ToUInt32("0555", 8);
+                            st->st_nlink = 2;
 
-                    var file = folder.Files.Find(f => f.FileName.Equals(strPath.Substring(1)));
-                    System.Console.WriteLine($"Testing {strPath} file? {file is null}");
-                    if (file is not null)
-                    {
-                        System.Console.WriteLine($"{strPath} is a file!");
-
-                        st->st_mode = S_IFREG | Convert.ToUInt32("0444", 8);
-                        st->st_nlink = 1;
-                        st->st_size = (long)file.UncompressedSize;
-
-                        st->st_atime = ((DateTimeOffset)file.TimeStamp).ToUnixTimeSeconds();
-                        st->st_mtime = ((DateTimeOffset)file.TimeStamp).ToUnixTimeSeconds();
-                        return 0;
-                    }
-                    else if (!IsNotADir)
-                    {
-                        st->st_mode = S_IFDIR | Convert.ToUInt32("0755", 8);
-                        st->st_nlink = 2;
-
-                        return 0;
-                    }
-                }
-                else
-                {
-                    return -2;
-                }
-
-
+                            long now = DateTimeOffset.Now.ToUnixTimeSeconds();
+                            st->st_atime = now;
+                            st->st_mtime = now;
+                            st->st_ctime = now;
+                            ret = 0;
+                        }
+                        break;
+                    default:
+                        ret = -Interop.Error.ENOENT;
+                        break;
+                };
             }
             catch
             {
                 // Exceptions escaping out of UnmanagedCallersOnly methods are treated as unhandled exceptions.
                 // The errors have to be marshalled manually if necessary.
-                return -5;
+                ret = -Interop.Error.EACCES;
             }
-
-            return -2;
-        }
-
-        public static RDAFolder? SeachFolderIn(RDAFolder folder, string strPath)
-        {
-            Queue<string> Queue = new Queue<string>(strPath.Split('/'));
-            Queue.Dequeue();
-            return SeachFolderIn(folder, Queue);
-        }
-        public static RDAFolder? SeachFolderIn(RDAFolder folder, Queue<string> Queue)
-        {
-            var folderToFind = Queue.Dequeue();
-            foreach (RDAFolder rdaFolder in folder.Folders)
-            {
-                if (rdaFolder.Name.Equals(folderToFind))
-                {
-                    if (!Queue.Any())
-                    {
-                        return rdaFolder;
-                    }
-                    else
-                    {
-                        return SeachFolderIn(rdaFolder, Queue);
-                    }
-                }
-            }
-            return null;
+            return ret;
         }
 
 
         [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-        public static unsafe int impl_readdir(IntPtr path, IntPtr buffer, delegate* unmanaged[Cdecl]<IntPtr, byte*, IntPtr, nint, int, int> filler, nint offset, IntPtr fi)
+        internal static unsafe int ImplReaddir(IntPtr path, IntPtr buffer, delegate* unmanaged[Cdecl]<IntPtr, byte*, IntPtr, nint, int, int> filler, nint offset, IntPtr fi)
         {
+            int ret = -Interop.Error.ENOENT;
             try
             {
-
-                string strPath = Marshal.PtrToStringUTF8(path);
-                Console.WriteLine($"Trying readdir {strPath} offset: {offset}");
-                Console.WriteLine($"readdir {strPath} offset: {offset}");
-
-                RDAFolder? folder = null;
-                System.Console.WriteLine(GetRdaFolder().Folders.Count);
-                if (strPath.Equals("/"))
+                string strPath = Marshal.PtrToStringUTF8(path)!;
+                switch (LookUpPath(path))
                 {
-                    folder = GetRdaFolder();
-                }
-                else
-                {
-                    //folder = RDAFolder.NavigateTo(GetRdaFolder(), strPath, "");
-                    folder = SeachFolderIn(GetRdaFolder(), strPath);
-                }
-
-                System.Console.WriteLine($"GetDirectoryName({strPath}) {Path.GetDirectoryName(strPath)?.Replace("\\", "/")}");
-
-                if (folder is not null)
-                {
-                    var lfile = folder.Files.Find(f => f.FileName.Equals(strPath.Substring(1)));
-                    if (lfile is not null)
-                    {
-                        System.Console.WriteLine($"{strPath} is a file: {lfile.FileName}");
-                        return -2;
-                    }
-                    else
-                    {
-                        System.Console.WriteLine($"{strPath} is a Folder! {folder.FullPath}");
-                    }
-
-                    Span<byte> utf8NullTerminated = stackalloc byte[255];
-                    var res = Encoding.UTF8.GetBytes("..".AsSpan(), utf8NullTerminated);
-                    utf8NullTerminated[res] = (byte)'\0';
-                    fixed (byte* p = &utf8NullTerminated[0])
-                    {
-                        filler(buffer, p, IntPtr.Zero, 0, 0);
-                    }
-
-                    res = Encoding.UTF8.GetBytes(".".AsSpan(), utf8NullTerminated);
-                    utf8NullTerminated[res] = (byte)'\0';
-                    fixed (byte* p = &utf8NullTerminated[0])
-                    {
-                        filler(buffer, p, IntPtr.Zero, 0, 0);
-                    }
-
-                    foreach (var subFolder in folder.Folders)
-                    {
-                        res = Encoding.UTF8.GetBytes(subFolder.Name.AsSpan(), utf8NullTerminated);
-                        utf8NullTerminated[res] = (byte)'\0';
-                        fixed (byte* p = &utf8NullTerminated[0])
+                    case RDAFile file:
+                        ret = -Interop.Error.ENOENT;
+                        break;
+                    case RDAFolder folder:
                         {
-                            filler(buffer, p, IntPtr.Zero, 0, 0);
+                            Span<byte> bufferUtf8NullTerminated = stackalloc byte[255];
+                            FillerWrapper(".",bufferUtf8NullTerminated);
+                            FillerWrapper("..",bufferUtf8NullTerminated);
+                            foreach (var subFolder in folder.Folders)
+                            {
+                                FillerWrapper(subFolder.Name,bufferUtf8NullTerminated);
+                            }
+                            foreach (var file in folder.Files)
+                            {
+                                FillerWrapper(Path.GetFileName(file.FileName),bufferUtf8NullTerminated);
+                            }
+                            ret = 0;
                         }
-                    }
-
-                    foreach (var file in folder.Files)
-                    {
-                        System.Console.WriteLine($"File: {Path.GetFileName(file.FileName)}");
-                        res = Encoding.UTF8.GetBytes(Path.GetFileName(file.FileName).AsSpan(), utf8NullTerminated);
-                        utf8NullTerminated[res] = (byte)'\0';
-                        fixed (byte* p = &utf8NullTerminated[0])
-                        {
-                            filler(buffer, p, IntPtr.Zero, 0, 0);
-                        }
-                    }
-                    return 0;
-                }
-                else
-                {
-                    System.Console.WriteLine($"{strPath} not found!");
-                    return -2;
-                }
-
-
+                        break;
+                    default:
+                        ret = -Interop.Error.ENOENT;
+                        break;
+                };
             }
-            catch (Exception)
+            catch
             {
                 // Exceptions escaping out of UnmanagedCallersOnly methods are treated as unhandled exceptions.
                 // The errors have to be marshalled manually if necessary.
-
-                return -1;
+                ret = -Interop.Error.EACCES;
             }
-            return -2;
+            return ret;
+
+
+            void FillerWrapper(string v,Span<byte> utf8NullTerminated) {
+                var res = Encoding.UTF8.GetBytes(v.AsSpan(), utf8NullTerminated);
+                utf8NullTerminated[res] = (byte)'\0';
+                fixed (byte* p = &utf8NullTerminated[0])
+                {
+                    filler(buffer, p, IntPtr.Zero, 0, 0);
+                }
+            }
         }
 
         [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-        public static unsafe int impl_read(IntPtr path, IntPtr buffer, nuint size, nint offset, Fuse3FileInfo* fi)
+        internal static unsafe int ImplRead(IntPtr path, IntPtr buffer, nuint size, nint offset, Fuse3FileInfo* fi)
         {
-            var file = globalFdTable[fi->fh];
-            Span<byte> bytes = new Span<byte>((byte*)buffer, (int)size);
+            var file = GlobalFdTable[fi->fh];
             if (file is not null)
             {
+                Span<byte> bytes = new Span<byte>((byte*)buffer, (int)size);
                 var data = file.GetData();
 
                 int upper = Math.Min(Math.Min((int)size, data.Length) + (int)offset, data.Length);
                 int ret = ((int)upper - (int)offset);
-                if (ret <= 0)
 
+                if (ret <= 0)
                 {
                     return 0;
                 }
                 try
                 {
                     //System.Console.WriteLine($"{strPath} is a file! upper: {upper} off: {offset} size: {size}");
-                    data[(int)offset..(int)upper].CopyTo(bytes);
+                    data.AsSpan()[(int)offset..(int)upper].CopyTo(bytes);
                     return (int)upper - (int)offset;
                 }
                 catch (Exception)
@@ -451,17 +264,23 @@ namespace Demo
                     throw;
                 }
             }
-            return -EBADF;
+            return -Interop.Error.EBADF;
+        }
+        internal static string[] ShiftArgs(string[] orignialArgs) {
+            var argsShifted = new string[orignialArgs.Length + 1];
+            argsShifted[0] = Process.GetCurrentProcess().MainModule?.FileName ?? "";
+            Array.Copy(orignialArgs, 0, argsShifted, 1, orignialArgs.Length);
+            System.Console.WriteLine(orignialArgs.Length);
+            System.Console.WriteLine(argsShifted.ToString());
+            return argsShifted;
         }
 
         public static void Main(string[] badargs)
         {
-            var argsShifted = new string[badargs.Length + 1];
-            argsShifted[0] = "";
-            Array.Copy(badargs, 0, argsShifted, 1, badargs.Length);
-            System.Console.WriteLine(badargs.Length);
-            System.Console.WriteLine(argsShifted.ToString());
-            pre_main(argsShifted.Length, argsShifted);
+            var argsShifted = ShiftArgs(badargs);
+            FuseNativeAdapter.pre_main(argsShifted.Length, argsShifted);
+
+            FuseNativeAdapter.PrintHelpIfNeeded();
 
             System.Console.WriteLine($"st_nlink: {Marshal.OffsetOf(typeof(Stat), "st_nlink")}");
             System.Console.WriteLine($"st_mode: {Marshal.OffsetOf(typeof(Stat), "st_mode")}");
@@ -474,7 +293,7 @@ namespace Demo
             System.Console.WriteLine($"fh: {Marshal.OffsetOf(typeof(Fuse3FileInfo), "fh")}");
 
             // var fileName = @"C:\Program Files (x86)\Ubisoft\Related Designs\ANNO 2070 DEMO\maindata\data0.rda";
-            string? fileName = Marshal.PtrToStringUTF8(GetRdaParameter());
+            string? fileName = Marshal.PtrToStringUTF8(FuseNativeAdapter.GetRdaParameter());
 
             //var fileName = @"/home/lukas/WinGuest/Data0.rda";
             string[] rdaFiles = {
@@ -495,30 +314,30 @@ namespace Demo
                 reader.FileName = file;
                 reader.ReadRDAFile();
                 listOfFilelists[i++] = reader.rdaFileEntries;
-                readers.Add(reader);
+                RDAReaders.Add(reader);
             }
             var lowest = listOfFilelists[0];
             var uppers = listOfFilelists[1..];
             var mergedFilelist = MergeList(lowest,uppers);
 
-            mergedFolder = RDAFolder.GenerateFrom(mergedFilelist, readers.First().rdaFolder.Version);
+            MergedFolder = RDAFolder.GenerateFrom(mergedFilelist, RDAReaders.First().rdaFolder.Version);
             
             System.Console.WriteLine($"stat size: {System.Runtime.InteropServices.Marshal.SizeOf(typeof(Stat))}");
 
             unsafe
             {
-                Console.WriteLine($"NativeFunctions that invokes a callback!");
-                PatchOpenOperations(&impl_open);
-                PatchReleaseOperations(&impl_release);
-                PatchFuseReadOperations(&impl_read);
-                PatchFuseReaddirOperations(&impl_readdir);
-                PatchFuseGetattrOperations(&impl_getattr);
+                Console.WriteLine($"Patching NativeFunctions (fuse operation) callback");
+                FuseNativeAdapter.PatchOpen(&ImplOpen);
+                FuseNativeAdapter.PatchRelease(&ImplRelease);
+                FuseNativeAdapter.PatchFuseRead(&ImplRead);
+                FuseNativeAdapter.PatchFuseReaddir(&ImplReaddir);
+                FuseNativeAdapter.PatchFuseGetattr(&ImplGetattr);
             }
-            main();
+            FuseNativeAdapter.main();
         }
 
         static RDAFolder GetRdaFolder() {
-            return mergedFolder;
+            return MergedFolder;
         }
 
         static List<RDAFile> MergeList(List<RDAFile> lower, IEnumerable<List<RDAFile>> uppers) {
