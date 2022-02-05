@@ -1,6 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <Target Name="SetSourceRevisionId" BeforeTargets="InitializeSourceControlInformation">
+    <Exec 
+      Command="git describe --long --always --dirty --exclude=* --abbrev=8"
+      ConsoleToMSBuild="True"
+      IgnoreExitCode="False"
+      >
+      <Output PropertyName="SourceRevisionId" TaskParameter="ConsoleOutput"/>
+    </Exec>
+  </Target>
+  
   <PropertyGroup>
+    <Version>1.0.0.0</Version>
+    <InformationalVersion>$(Version)-alpha$(SourceRevisionId)</InformationalVersion>
     <OutputType>Exe</OutputType>
     <TargetFramework>net6.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -15,4 +27,6 @@
 	<ItemGroup>
 		<ProjectReference Include="../RDAExplorer\RDAExplorer.csproj" />
 	</ItemGroup>
+
+  
 </Project>

@@ -99,7 +99,7 @@ namespace MntRDA
         internal static extern int pre_main(int argc, string[] argv);
 
         [DllImport(DLL_PATH)]
-        internal static extern void PrintHelpIfNeeded();
+        internal static extern unsafe int PrintHelpIfNeeded(delegate* unmanaged[Cdecl]<int> callback);
 
         [DllImport(DLL_PATH)]
         internal static extern int main();

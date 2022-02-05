@@ -138,45 +138,53 @@ int pre_main(int argc, char* argv[]) {
 	if (fuse_opt_parse(&f_args, &options, option_spec, NULL) == -1)
 		return 1;
 	
-
-	printf("offset st_nlink: %zu\n", offsetof(struct fuse_stat, st_nlink));
-	printf("offset st_mode: %zu\n", offsetof(struct fuse_stat, st_mode));
-	printf("offset st_uid: %zu\n", offsetof(struct fuse_stat, st_uid));
-	printf("offset st_gid: %zu\n", offsetof(struct fuse_stat, st_gid));
-	printf("offset st_rdev: %zu\n", offsetof(struct fuse_stat, st_rdev));
-	printf("offset st_atim: %zu\n", offsetof(struct fuse_stat, st_atim));
-	printf("offset st_mtim: %zu\n", offsetof(struct fuse_stat, st_mtim));
+	if (!options.show_help) {
+		printf("offset st_nlink: %zu\n", offsetof(struct fuse_stat, st_nlink));
+		printf("offset st_mode: %zu\n", offsetof(struct fuse_stat, st_mode));
+		printf("offset st_uid: %zu\n", offsetof(struct fuse_stat, st_uid));
+		printf("offset st_gid: %zu\n", offsetof(struct fuse_stat, st_gid));
+		printf("offset st_rdev: %zu\n", offsetof(struct fuse_stat, st_rdev));
+		printf("offset st_atim: %zu\n", offsetof(struct fuse_stat, st_atim));
+		printf("offset st_mtim: %zu\n", offsetof(struct fuse_stat, st_mtim));
+	}
 	return 0;
 }
 
-void PrintHelpIfNeeded() {
+int PrintHelpIfNeeded(int (*MntRDAHelpText)(void)) {
 	if (options.show_help) {
-		printf("Dummy help MntRDA!");
+		MntRDAHelpText();
+		fuse_lib_help(&f_args);
 		assert(fuse_opt_add_arg(&f_args, "--help") == 0);
 		f_args.argv[0][0] = '\0';
+		return 1;
 	}
+	return 0;
 }
 
 int main()
 {
-    
-	operations.init = hello_init;
+    int ret = 0;
+	if(!options.show_help) {
+		operations.init = hello_init;
 
-	printf("operations.getattr %p,\n", operations.getattr);
-	printf("operations.readdir %p,\n", operations.readdir);
-	printf("operations.open %p,\n", operations.read);
-	printf("operations.read %p,\n", operations.open);
+		printf("operations.getattr %p,\n", operations.getattr);
+		printf("operations.readdir %p,\n", operations.readdir);
+		printf("operations.open %p,\n", operations.read);
+		printf("operations.read %p,\n", operations.open);
 
-	printf("sizeof: fuse_stat %lld\n", sizeof(struct fuse_stat));
-	printf("sizeof fuse_file_info: %lld\n", sizeof(struct fuse_file_info));
-	printf("sizeof fuse_off_t: %lld\n", sizeof(fuse_off_t));
-	printf("offset fh: %lld\n", offsetof(struct fuse_file_info, fh));
+		printf("sizeof: fuse_stat %lld\n", sizeof(struct fuse_stat));
+		printf("sizeof fuse_file_info: %lld\n", sizeof(struct fuse_file_info));
+		printf("sizeof fuse_off_t: %lld\n", sizeof(fuse_off_t));
+		printf("offset fh: %lld\n", offsetof(struct fuse_file_info, fh));
 
 
-	for(int i=0;i<f_args.argc;i++) {
-		printf("f_args.argv[%d]=%s\n",i,f_args.argv[i]);
+		for(int i=0;i<f_args.argc;i++) {
+			printf("f_args.argv[%d]=%s\n",i,f_args.argv[i]);
+		}
+	
+		ret = fuse_main(f_args.argc, f_args.argv, &operations, NULL);
 	}
-	int ret = fuse_main(f_args.argc, f_args.argv, &operations, NULL);
+	
 	fuse_opt_free_args(&f_args);
 	return ret;
 }
