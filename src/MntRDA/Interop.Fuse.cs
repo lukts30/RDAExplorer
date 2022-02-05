@@ -45,7 +45,7 @@ namespace MntRDA
             internal Int64 st_mtime;
             UInt32 st_mtime_nsec;
 
-            UInt64 st_ctime;
+            internal Int64 st_ctime;
             UInt64 st_ctime_nsec;
 
             UInt64 __pad1;
