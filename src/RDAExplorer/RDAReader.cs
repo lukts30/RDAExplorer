@@ -11,7 +11,7 @@ namespace RDAExplorer
 {
     public class RDAReader : IDisposable
     {
-        public List<RDAFile> rdaFileEntries { get; } = new List<RDAFile>();
+        public Dictionary<string,RDAFile> rdaFileEntries { get; } = new Dictionary<string,RDAFile>();
         public RDAFolder rdaFolder = new RDAFolder(FileHeader.Version.Version_2_2);
         public string FileName;
         private BinaryReader read;
@@ -92,7 +92,7 @@ namespace RDAExplorer
             // When writing we need to make sure that the section that is latest in the file is the last one in this list.
             skippedDataSections.Sort((a, b) => a.offset.CompareTo(b.offset));
 
-            rdaFolder = RDAFolder.GenerateFrom(rdaFileEntries, fileHeader.version);
+            rdaFolder = RDAFolder.GenerateFrom(rdaFileEntries.Values, fileHeader.version);
             UpdateOutput("Done. " + rdaFileEntries.Count + " files. " + rdaReadBlocks + " blocks read, " + NumSkippedBlocks + " encrypted blocks skipped (" + NumSkippedFiles + " files).");
         }
 
@@ -243,7 +243,7 @@ namespace RDAExplorer
                 };
 
                 RDAFile rdaFile = RDAFile.FromUnmanaged(fileHeader.version, dirEntry, block, read, mrm);
-                rdaFileEntries.Add(rdaFile);
+                rdaFileEntries.Add(rdaFile.FileName,rdaFile);
             }
         }
 

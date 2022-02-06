@@ -28,7 +28,6 @@
 #endif
 
 static struct options {
-	const char *rda;
 	const char *filename;
 	const char *contents;
 	int show_help;
@@ -37,7 +36,6 @@ static struct options {
 #define OPTION(t, p)                           \
     { t, offsetof(struct options, p), 1 }
 static const struct fuse_opt option_spec[] = {
-	OPTION("--rda=%s", rda),
 	OPTION("-h", show_help),
 	OPTION("--help", show_help),
 	FUSE_OPT_END
@@ -117,13 +115,38 @@ static int hello_read(const char* path, char* buf, size_t size, fuse_off_t offse
 static void* hello_init(struct fuse_conn_info* conn,
 	struct fuse_config* cfg)
 {
-	conn->want |= (conn->capable & FSP_FUSE_CAP_READ_ONLY);
+	#ifdef USE_WINFSP
+		conn->want |= (conn->capable & FSP_FUSE_CAP_READ_ONLY);
+    #endif
+
 	cfg->kernel_cache = 1;
 	return NULL;
 }
 
 static struct fuse_operations operations = { 0 };
 static struct fuse_args f_args = { 0 };
+static int (*ParseRDAArgs)(const char *arg) = NULL;
+
+int opt_proc(void *data, const char *arg, int key, struct fuse_args *outargs) {
+	(void)data;  // prevent compiler warning
+
+	int res = 0; // for general purposes
+	switch (key) {
+		case FUSE_OPT_KEY_NONOPT:
+			res = ParseRDAArgs(arg);
+			// -1 on error, 0 if arg is to be discarded, 1 if arg should be kept
+			return res;
+		case FUSE_OPT_KEY_DISCARD:
+			return 0;	
+		case FUSE_OPT_KEY_KEEP:
+			return 1;
+		case FUSE_OPT_KEY_OPT:
+			//printf("Unknown option for MntRDA: %s\n",arg);
+			return 1;
+		default:
+			return 1;
+	}
+}
 
 int pre_main(int argc, char* argv[]) {
 	#ifdef USE_WINFSP
@@ -135,7 +158,7 @@ int pre_main(int argc, char* argv[]) {
 	f_args = args;
 
 	/* Parse options */
-	if (fuse_opt_parse(&f_args, &options, option_spec, NULL) == -1)
+	if (fuse_opt_parse(&f_args, &options, option_spec, opt_proc) == -1)
 		return 1;
 	
 	if (!options.show_help) {
@@ -221,6 +244,8 @@ void PatchRelease(int (*f)(const char* path, struct fuse_file_info* fi)) {
 	printf(".getattr: %p\n", operations.getattr);
 }
 
-const char* GetRdaParameter() {
-	return options.rda;
+ void PatchParseRDAArgs(int (*f)(const char *arg)) {
+	printf("ParseRDAArgs: %p\n", ParseRDAArgs);
+	ParseRDAArgs = f;
+	printf("ParseRDAArgs: %p\n", ParseRDAArgs);
 }

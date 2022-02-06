@@ -1,6 +1,7 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.CompilerServices;
+using System.Collections.ObjectModel;
 using System.Collections.Concurrent;
 using System.Text;
 using System.Diagnostics;
@@ -11,8 +12,13 @@ namespace MntRDA
 {
     internal class Program
     {
+        static string[] RDAFiles;
+
+        static bool HasRDAFiles = false;
+
         static List<RDAReader> RDAReaders = new();
 
+        static Dictionary<string,RDAFile> MergedFileEntries;
         static RDAFolder? MergedFolder;
         static ConcurrentDictionary<long, RDAFile> GlobalFdTable = new();
         static Random FdRandomGen = new Random();
@@ -46,37 +52,24 @@ namespace MntRDA
 
         internal static Object? LookUpPath(IntPtr path)
         {
-            bool IsNotADir = false;
             try
             {
-
                 string strPath = Marshal.PtrToStringUTF8(path)!;
+                RDAFile? maybeFile = FastLookUpFile(strPath);
+                if(maybeFile is not null) {
+                    return maybeFile;
+                }
+
                 RDAFolder? folder = null;
                 if (strPath.Equals("/"))
                 {
                     folder = GetRdaFolder();
+                    return folder;
                 }
                 else
                 {
                     folder = SeachFolderIn(GetRdaFolder(), strPath);
-                    if (folder is null)
-                    {
-                        folder = SeachFolderIn(GetRdaFolder(), Path.GetDirectoryName(strPath)!.Replace("\\", "/"));
-                        IsNotADir = true;
-                    }
-                }
-
-                if (folder is not null)
-                {
-
-                    var file = folder.Files.Find(f => f.FileName.Equals(strPath.Substring(1)));
-                    System.Console.WriteLine($"Testing {strPath} file? {file is null}");
-                    if (file is not null)
-                    {
-                        System.Console.WriteLine($"{strPath} is a file!");
-                        return file;
-                    }
-                    else if (!IsNotADir)
+                    if (folder is not null)
                     {
                         return folder;
                     }
@@ -87,6 +80,12 @@ namespace MntRDA
                 return null;
             }
             return null;
+        }
+
+        internal static RDAFile? FastLookUpFile(String path)
+        {
+            MergedFileEntries.TryGetValue(path.Substring(1), out RDAFile?  file);
+            return file;
         }
 
         [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
@@ -118,8 +117,12 @@ namespace MntRDA
                 }
                 fi->fh = fid;
                 System.Console.WriteLine($"Added fd: {fid}");
+                return 0;
+            } else
+            {
+                return -Interop.Error.ENOENT;
             }
-            return 0;
+            
         }
 
         [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
@@ -147,7 +150,7 @@ namespace MntRDA
                 {
                     case RDAFile file:
                         {
-                            System.Console.WriteLine($"{strPath} is a file!");
+                            // System.Console.WriteLine($"{strPath} is a file!");
                             st->st_mode = Interop.FileTypes.S_IFREG | Convert.ToUInt32("0444", 8);
                             st->st_nlink = 1;
                             st->st_size = (long)file.UncompressedSize;
@@ -269,12 +272,39 @@ namespace MntRDA
             return -Interop.Error.EBADF;
         }
 
+        /// -1 on error, 0 if arg is to be discarded, 1 if arg should be kept
+        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+        internal static int ImplParseRDAArgs(IntPtr args)
+        {
+            if(!HasRDAFiles) {
+                try
+                {
+                    string files = Marshal.PtrToStringUTF8(args)!;
+                    RDAFiles = files.Split(":");
+                    foreach (var file in RDAFiles)
+                    {
+                        if(!File.Exists(file)) {
+                            System.Console.WriteLine(new FileNotFoundException(null,file).ToString());
+                            return -1;
+                        }
+                    }
+                    HasRDAFiles = true;
+                    return 0;
+                } catch {
+                    return -1;
+                }
+            } else
+            {
+                return 1;
+            }
+        }
+
         [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
         internal static int PrintHelp()
         {
             string semanticVersion = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>().InformationalVersion;
             Console.WriteLine($"MntRDA version {semanticVersion}");
-            Console.WriteLine(@"Usage: MntRDA [options] --rda=top_rda:lower_rda:*:lowest_rda mountpoint
+            Console.WriteLine(@"Usage: MntRDA [options] top_rda:lower_rda:...:lowest_rda mountpoint
 Overlays one or several rda files into one single mount point.
 (Read-only virtual file system)
    
@@ -288,7 +318,7 @@ general options:
     -V   --version         print version
    
 MntRDA options:
-    --rda=top:*:lowest    List of rda files separated by a colon to merge. 
+    top:...:lowest        List of rda files separated by colon to merge. 
                           At least one rda file is required. 
 
 FUSE options:");
@@ -317,8 +347,12 @@ FUSE options:");
             }
             var argsShifted = ShiftArgs(badargs);
             
-            FuseNativeAdapter.pre_main(argsShifted.Length, argsShifted);
-
+            FuseNativeAdapter.PatchParseRDAArgs(&ImplParseRDAArgs);
+            if (FuseNativeAdapter.pre_main(argsShifted.Length, argsShifted) == 1)
+            {
+                return 1;
+            }
+         
             if (FuseNativeAdapter.PrintHelpIfNeeded(&PrintHelp) == 0)
             {
 
@@ -332,40 +366,21 @@ FUSE options:");
 
                 System.Console.WriteLine($"fh: {Marshal.OffsetOf(typeof(Fuse3FileInfo), "fh")}");
 
-                string? fileName = Marshal.PtrToStringUTF8(FuseNativeAdapter.GetRdaParameter());
-                if (String.IsNullOrEmpty(fileName))
-                {
-                    NoEnoughArgs();
-                    return 1;
-                }
-                string[] rdaFiles = fileName.Split(":");
-
-                //var fileName = @"/home/lukas/WinGuest/Data0.rda";
-                /* string[] rdaFiles = {
-                @"/home/lukas/Games/ubisoft-connect/drive_c/Program Files (x86)/Ubisoft/Ubisoft Game Launcher/games/Anno 1404 - History Edition/addon/data0.rda",
-                @"/home/lukas/Games/ubisoft-connect/drive_c/Program Files (x86)/Ubisoft/Ubisoft Game Launcher/games/Anno 1404 - History Edition/addon/data1.rda",
-                @"/home/lukas/Games/ubisoft-connect/drive_c/Program Files (x86)/Ubisoft/Ubisoft Game Launcher/games/Anno 1404 - History Edition/addon/data2.rda",
-                @"/home/lukas/Games/ubisoft-connect/drive_c/Program Files (x86)/Ubisoft/Ubisoft Game Launcher/games/Anno 1404 - History Edition/addon/data3.rda",
-                @"/home/lukas/Games/ubisoft-connect/drive_c/Program Files (x86)/Ubisoft/Ubisoft Game Launcher/games/Anno 1404 - History Edition/addon/data4.rda",
-                @"/home/lukas/Games/ubisoft-connect/drive_c/Program Files (x86)/Ubisoft/Ubisoft Game Launcher/games/Anno 1404 - History Edition/addon/data5.rda"
-                }; */
-                //string[] rdaFiles = { @"/home/lukas/WinGuest/Data0.rda" };
-
-                List<RDAFile>[] listOfFilelists = new List<RDAFile>[rdaFiles.Length];
+                ReadOnlyDictionary<string,RDAFile>[] rdaFileEntriesDicts = new ReadOnlyDictionary<string,RDAFile>[RDAFiles.Length];
                 int i = 0;
-                foreach (var file in rdaFiles)
+                foreach (var file in RDAFiles.Reverse())
                 {
                     var reader = new RDAReader();
                     reader.FileName = file;
                     reader.ReadRDAFile();
-                    listOfFilelists[i++] = reader.rdaFileEntries;
+                    rdaFileEntriesDicts[i++] = new(reader.rdaFileEntries);
                     RDAReaders.Add(reader);
                 }
-                var lowest = listOfFilelists[0];
-                var uppers = listOfFilelists[1..];
-                var mergedFilelist = MergeList(lowest, uppers);
+                var lowest = rdaFileEntriesDicts[0];
+                var uppers = rdaFileEntriesDicts[1..];
+                MergedFileEntries = MergeFileEntries(lowest, uppers);
 
-                MergedFolder = RDAFolder.GenerateFrom(mergedFilelist, RDAReaders.First().rdaFolder.Version);
+                MergedFolder = RDAFolder.GenerateFrom(MergedFileEntries.Values, RDAReaders.First().rdaFolder.Version);
 
                 System.Console.WriteLine($"stat size: {System.Runtime.InteropServices.Marshal.SizeOf(typeof(Stat))}");
 
@@ -393,6 +408,7 @@ FUSE options:");
                 });
             #endif
             int ret = FuseNativeAdapter.main();
+            // TODO make use of Dispose before return.
             return ret;
         }
 
@@ -401,17 +417,17 @@ FUSE options:");
             return MergedFolder;
         }
 
-        static List<RDAFile> MergeList(List<RDAFile> lower, IEnumerable<List<RDAFile>> uppers)
+        static Dictionary<string,RDAFile> MergeFileEntries(ReadOnlyDictionary<string,RDAFile> lower, IEnumerable<ReadOnlyDictionary<string,RDAFile>> uppers)
         {
-            var dict = lower.ToDictionary(f => f.FileName);
+            Dictionary<string,RDAFile> dict = new Dictionary<string,RDAFile>(lower);
             foreach (var upper in uppers)
             {
-                MergeList(dict, upper);
+                MergeList(dict, upper.Values);
             }
-            return dict.Values.ToList<RDAFile>();
+            return dict;
         }
 
-        static void MergeList(Dictionary<string, RDAFile> lower, List<RDAFile> upper)
+        static void MergeList(Dictionary<string, RDAFile> lower, IEnumerable<RDAFile> upper)
         {
             foreach (var file in upper)
             {

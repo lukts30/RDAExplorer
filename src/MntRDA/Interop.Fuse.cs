@@ -106,9 +106,6 @@ namespace MntRDA
 
 
         [DllImport(DLL_PATH)]
-        internal static extern IntPtr GetRdaParameter();
-
-        [DllImport(DLL_PATH)]
         internal static extern unsafe void PatchOpen(delegate* unmanaged[Cdecl]<IntPtr, Fuse3FileInfo*, int> callback);
 
         [DllImport(DLL_PATH)]
@@ -124,5 +121,7 @@ namespace MntRDA
         [DllImport(DLL_PATH)]
         internal static extern unsafe void PatchFuseReaddir(delegate* unmanaged[Cdecl]<IntPtr, IntPtr, delegate* unmanaged[Cdecl]<IntPtr, byte*, IntPtr, nint, int, int>, nint, IntPtr, int> callback);
 
+        [DllImport(DLL_PATH)]
+        internal static extern unsafe void PatchParseRDAArgs(delegate* unmanaged[Cdecl]<IntPtr,int> callback);
     }
 }

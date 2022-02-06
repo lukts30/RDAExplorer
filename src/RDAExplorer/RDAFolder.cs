@@ -76,11 +76,11 @@ namespace RDAExplorer
             return this.Parent.GetRoot();
         }
 
-        public static RDAFolder GenerateFrom(List<RDAFile> file, FileHeader.Version version)
+        public static RDAFolder GenerateFrom(IEnumerable<RDAFile> file, FileHeader.Version version)
         {
             RDAFolder root = new RDAFolder(version);
-            root.Files.AddRange(file.FindAll(f => !f.FileName.Contains("/")));
-            foreach (RDAFile rdaFile in file.FindAll(f => f.FileName.Contains("/")))
+            root.Files.AddRange(file.Where(f => !f.FileName.Contains("/")));
+            foreach (RDAFile rdaFile in file.Where(f => f.FileName.Contains("/")))
                 NavigateTo(root, Path.GetDirectoryName(rdaFile.FileName), "").Files.Add(rdaFile);
             return root;
         }

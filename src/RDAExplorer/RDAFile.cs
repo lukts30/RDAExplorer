@@ -1,6 +1,8 @@
 using RDAExplorer.Misc;
 using System;
 using System.IO;
+using System.Runtime.Caching;
+using Microsoft.Win32.SafeHandles;
 
 namespace RDAExplorer
 {
@@ -17,9 +19,9 @@ namespace RDAExplorer
         public BinaryReader BinaryFile;
         public FileStream FileStream;
 
+        private SafeFileHandle FileHandle;
+
         readonly object LockObject = new object();
-        private byte[] ContentData;
-        private bool ReadAndProcessed;
 
         public void SetFile(string file)
         {
@@ -38,70 +40,60 @@ namespace RDAExplorer
 
         public byte[] GetData()
         {
-            // Read the source file into a byte array.
-            // BinaryFile.BaseStream.Position = (long)Offset;
-            //BinaryFile.BaseStream.Position = 0;
-            byte[] numArray = null;
-            int numBytesToRead = (int)CompressedSize;
-            int numBytesRead = 0;
-            // One migh considerer this to be a memory leak :)
-            if (ContentData is null)
+            lock (LockObject)
             {
-                if (BinaryFile.BaseStream is FileStream)
-                {
-                    numArray = new byte[CompressedSize];
-                    while (numBytesToRead > 0)
+                var cache = MemoryCache.Default;
+                var key = this.FileName;
+                byte[] numArray = cache[key] as byte[];
+
+                if(numArray is null) {
+                    int numBytesToRead = (int)CompressedSize;
+                    int numBytesRead = 0;
+
+                    if (FileHandle is not null)
                     {
-                        // Read may return anything from 0 to numBytesToRead.
-                        Span<Byte> dstSpan = numArray.AsSpan()[numBytesRead..numBytesToRead];
-                        // int k = BinaryFile.Read(numArrayGood, numBytesRead, numBytesToRead);
-                        int n = RandomAccess.Read(FileStream.SafeFileHandle, dstSpan, (long)this.Offset + (long)numBytesRead);
+                        numArray = new byte[CompressedSize];
+                        while (numBytesToRead > 0)
+                        {
+                            // Read may return anything from 0 to numBytesToRead.
+                            Span<Byte> dstSpan = numArray.AsSpan()[numBytesRead..numBytesToRead];
+                            // int k = BinaryFile.Read(numArrayGood, numBytesRead, numBytesToRead);
+                            int n = RandomAccess.Read(FileHandle, dstSpan, (long)this.Offset + (long)numBytesRead);
 
-                        // Break when the end of the file is reached.
-                        if (n == 0)
-                            break;
+                            // Break when the end of the file is reached.
+                            if (n == 0)
+                                break;
 
-                        numBytesRead += n;
-                        numBytesToRead -= n;
+                            numBytesRead += n;
+                            numBytesToRead -= n;
+                        }
+                        numBytesToRead = numArray.Length;
                     }
-                    numBytesToRead = numArray.Length;
-                }
-                else
-                {
-                    lock (LockObject)
+                    else
                     {
                         BinaryFile.BaseStream.Position = (long)Offset;
                         numArray = BinaryFile.ReadBytes((int)CompressedSize);
                     }
+
+                    if (string.IsNullOrEmpty(OverwrittenFilePath))
+                    {
+                        if ((Flags & Flag.Encrypted) == Flag.Encrypted)
+                            numArray = BinaryExtension.Decrypt(numArray, BinaryExtension.GetDecryptionSeed(Version));
+                        if ((Flags & Flag.Compressed) == Flag.Compressed)
+                            numArray = ZLib.ZLib.Uncompress(numArray, (int)UncompressedSize);
+                    }
+
+                    var cacheItemPolicy = new CacheItemPolicy  
+                    {  
+                        SlidingExpiration = TimeSpan.FromSeconds(60),
+                    };
+                    cache.Set(key, numArray, cacheItemPolicy); 
+
+                } else {
+                    System.Console.WriteLine($"Cache hit: {key}");
                 }
-                lock (LockObject) {
-                    this.ContentData = numArray;
-                }
-            } else
-            {
-                lock (LockObject) {
-                    numArray = this.ContentData;
-                }
+                return numArray;
             }
-            
-            int r = (int)Flags;
-            System.Console.WriteLine(r);
-            
-            if(!ReadAndProcessed)
-            {
-                if (string.IsNullOrEmpty(OverwrittenFilePath))
-                {
-                    if ((Flags & Flag.Encrypted) == Flag.Encrypted)
-                        numArray = BinaryExtension.Decrypt(numArray, BinaryExtension.GetDecryptionSeed(Version));
-                    if ((Flags & Flag.Compressed) == Flag.Compressed)
-                        numArray = ZLib.ZLib.Uncompress(numArray, (int)UncompressedSize);
-                }
-                lock (LockObject) {
-                    this.ContentData = numArray;
-                    this.ReadAndProcessed = true;
-                }
-            }
-            return numArray;
         }
 
         public void ExtractToRoot(string folder)
@@ -143,6 +135,9 @@ namespace RDAExplorer
             rdaFile.TimeStamp = DateTimeExtension.FromTimeStamp(dir.timestamp);
             rdaFile.BinaryFile = mrm == null ? reader : new BinaryReader(mrm.Data);
             rdaFile.FileStream = (FileStream)reader.BaseStream;
+            if(mrm == null) {
+                rdaFile.FileHandle = rdaFile.FileStream.SafeFileHandle;
+            }
             return rdaFile;
         }
 
