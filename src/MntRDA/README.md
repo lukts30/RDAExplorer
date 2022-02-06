@@ -17,7 +17,7 @@ You should not need to reboot unless WinFsp was already running on your system.
 ## USAGE AND OPTIONS
 
 ```
-MntRDA version 2.0.0.0-alpha
+MntRDA version 2.0.1.0-alpha
 Usage: MntRDA [options] top_rda#lower_rda#...#lowest_rda mountpoint
 Overlays one or several rda files into one single mount point.
 (Read-only virtual file system)
@@ -32,7 +32,7 @@ general options:
     -V   --version         print version
    
 MntRDA options:
-    top:...:lowest        List of rda files separated by '#' to merge. 
+    top#...#lowest         List of rda files separated by '#' to merge. 
                           At least one rda file is required. 
 ```
 

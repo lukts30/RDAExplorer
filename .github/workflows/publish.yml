@@ -34,10 +34,12 @@ jobs:
 
       - name: Package
         run: |
+          sudo apt-get -qq update
+          sudo apt-get -qq install libarchive-tools
           mkdir package
           ls -lah
-          tar -caf package/MntRDA-windows-x64.zip MntRDA-windows-x64
-          tar -caf package/MntRDA-linux-x64.zip MntRDA-linux-x64
+          bsdtar -caf package/MntRDA-windows-x64.zip MntRDA-windows-x64
+          bsdtar -caf package/MntRDA-linux-x64.zip MntRDA-linux-x64
 
       - name: Upload MntRDA-windows-x64
         id: upload-windows
