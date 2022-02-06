@@ -18,7 +18,7 @@ You should not need to reboot unless WinFsp was already running on your system.
 
 ```
 MntRDA version 1.0.0.0-alpha
-Usage: MntRDA [options] top_rda:lower_rda:...:lowest_rda mountpoint
+Usage: MntRDA [options] top_rda$lower_rda$...$lowest_rda mountpoint
 Overlays one or several rda files into one single mount point.
 (Read-only virtual file system)
    
@@ -32,14 +32,14 @@ general options:
     -V   --version         print version
    
 MntRDA options:
-    top:...:lowest        List of rda files separated by colon to merge. 
+    top:...:lowest        List of rda files separated by '$' to merge. 
                           At least one rda file is required. 
 ```
 
 ### Example Usage
 
 ```
-MntRDA -s -f data21.rda:data20.rda:data19.rda:data18.rda:data17.rda:data16.rda:data15.rda:data14.rda:data13.rda:data12.rda:data11.rda:data10.rda:data9.rda:data8.rda:data7.rda:data6.rda:data5.rda:data4.rda:data3.rda:data2.rda:data1.rda:data0.rda mountpoint
+MntRDA -s -f data21.rda$data20.rda$data19.rda$data18.rda$data17.rda$data16.rda$data15.rda$data14.rda$data13.rda$data12.rda$data11.rda$data10.rda$data9.rda$data8.rda$data7.rda$data6.rda$data5.rda$data4.rda$data3.rda$data2.rda$data1.rda$data0.rda mountpoint
 ```
 
 Windows :
@@ -48,8 +48,8 @@ The instructions are from [rclone](https://rclone.org/commands/rclone_mount/#mou
 
 ```
 MntRDA data0.rda X:
-MntRDA data1.rda:data0.rda C:\path\parent\mount
-MntRDA data1.rda:data0.rda X:
+MntRDA data1.rda$data0.rda C:\path\parent\mount
+MntRDA data1.rda$data0.rda X:
 ```
 
 ## Known problems

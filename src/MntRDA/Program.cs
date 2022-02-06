@@ -280,7 +280,8 @@ namespace MntRDA
                 try
                 {
                     string files = Marshal.PtrToStringUTF8(args)!;
-                    RDAFiles = files.Split(":");
+                    System.Console.WriteLine(files);
+                    RDAFiles = files.Split("#");
                     foreach (var file in RDAFiles)
                     {
                         if(!File.Exists(file)) {
@@ -304,7 +305,7 @@ namespace MntRDA
         {
             string semanticVersion = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>().InformationalVersion;
             Console.WriteLine($"MntRDA version {semanticVersion}");
-            Console.WriteLine(@"Usage: MntRDA [options] top_rda:lower_rda:...:lowest_rda mountpoint
+            Console.WriteLine(@"Usage: MntRDA [options] top_rda#lower_rda#...#lowest_rda mountpoint
 Overlays one or several rda files into one single mount point.
 (Read-only virtual file system)
    
@@ -318,8 +319,8 @@ general options:
     -V   --version         print version
    
 MntRDA options:
-    top:...:lowest        List of rda files separated by colon to merge. 
-                          At least one rda file is required. 
+    top#...#lowest         List of rda files separated by '#' to merge. 
+                           At least one rda file is required. 
 
 FUSE options:");
             return 0;
